@@ -202,5 +202,5 @@ Execution timestamp: Wed Sep 30 10:30:00 2026
 ## Author
 
 **Prathmesh Girme**
-* GitHub: [@your-username](https://github.com/<Prathmesh-Girme>)
+* GitHub: [@Prathmesh-Girme](https://github.com/<Prathmesh-Girme>)
 

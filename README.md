@@ -202,8 +202,5 @@ Execution timestamp: Wed Sep 30 10:30:00 2026
 ## Author
 
 **Prathmesh Girme**
-* GitHub: [@your-username](https://github.com/<your-username>)
+* GitHub: [@your-username](https://github.com/<Prathmesh-Girme>)
 
-## License
-
-This project is licensed under the [MIT License](LICENSE).

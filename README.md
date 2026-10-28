@@ -1,141 +1,187 @@
-# DiskSanitizer - Automated File Cleanup & Storage Optimization Utility
+# DiskSanitizer - Automated Empty File Cleanup using Python & schedule
 
-**DiskSanitizer** is a Python-based system automation tool built to clean up directories, remove zero-byte (empty) files, and log file metrics with precise timestamps.
+This project demonstrates an **automated file system cleanup utility** that scans a directory recursively, records every file size in a timestamped audit log, and **deletes zero-byte (empty) files** on a configurable schedule.
 
----
+It follows **industrial best practices** by:
 
-## Motivation & Thought Process
-
-In modern operating systems and developer environments, temporary processes, aborted applications, and background routines frequently leave behind empty zero-byte files. Over time, these unneeded files can clutter workspace searches, fragment folder structures, and complicate system navigation.
-
-`DiskSanitizer` was created as an automated background utility to replace manual housekeeping. The goal was to build a script that:
-- Runs quietly in the background on a customizable schedule.
-- Performs recursive scans across deeply nested folder structures.
-- Generates clear, timestamped audit logs for administrative verification.
-- Solves pathing and privilege challenges safely without interrupting other system tasks.
-
----
-
-## Architecture & System Flow
-
-```
-+------------------+     +------------------------+     +--------------------------+
-|  User Command /  | --> | Path & CLI Argument    | --> | Create Timestamped       |
-|  Scheduled Job   |     | Validation             |     | Audit Log File           |
-+------------------+     +------------------------+     +--------------------------+
-                                                                     |
-                                                                     v
-+------------------+     +------------------------+     +--------------------------+
-| Close Log File   | <-- | Delete Zero-Byte Files | <-- | Traverse Directory Tree  |
-| & Wait for Loop  |     | & Write Stats to Log   |     | (`os.walk`)              |
-+------------------+     +------------------------+     +--------------------------+
-```
-
-1. **Immediate Initial Pass:** Runs one cleanup cycle immediately upon initiation so the user doesn't have to wait for the first scheduled timer tick.
-2. **Path Guarding:** Verifies the existence (`os.path.exists`) and type (`os.path.isdir`) of the user-provided target directory before attempting file operations.
-3. **Recursive Inspection:** Uses `os.walk` to traverse all subdirectories and inspect individual file sizes using `os.path.getsize`.
-4. **Targeted Purging:** Identifies zero-byte files and safely removes them with `os.remove`.
-5. **Detailed Logging:** Captures all metrics and outcomes in dynamically named log files (`DiskSanitizer_Log_<timestamp>.log`).
+- Automating periodic cleanups with the **schedule** library
+- Providing a **dry-run mode** to preview deletions before anything is removed
+- Never following or deleting **symbolic links**
+- Protecting its own log files and refusing to run on a **filesystem root**
+- Handling locked or protected files with **exception handling**, so one failure never stops a run
+- Writing audit reports **atomically** (temp file, then rename), so a log is never half-written
+- Using Python's **logging** module and a standard **argparse CLI** with input validation and exit codes
+- Shutting down cleanly on **Ctrl + C** and **SIGTERM**
 
 ---
 
-## Technical Challenges & Solutions
+## Dependencies
 
-### 1. OS-Safe Timestamped Filenames
-* **Challenge:** Raw date strings returned by `time.ctime()` contain spaces and colons (`:`) which are illegal filename characters on Windows systems.
-* **Solution:** Applied string sanitation rules to replace spaces and colons with underscores (`.replace(" ", "_").replace(":", "_")`), guaranteeing safe log creation across Windows, macOS, and Linux.
-
-### 2. File Lockouts & Permission Errors
-* **Challenge:** System files or files locked by active background processes caused unhandled `PermissionError` or `FileNotFoundError` exceptions during scans.
-* **Solution:** Encapsulated individual file removal logic within `try-except` blocks. If an individual file fails to open or delete, the error is written to the audit log while the main scan continues smoothly.
-
-### 3. Graceful Termination of Continuous Loops
-* **Challenge:** Stopping the continuous background scheduling loop (`while True`) with `Ctrl + C` generated ugly stack traces in standard terminals.
-* **Solution:** Wrapped the schedule execution loop inside a `KeyboardInterrupt` exception block, ensuring a clean exit prompt when canceled by the user.
-
----
-
-## Features
-
-- **Recursive Subdirectory Scanning:** Traverses entire directory structures recursively using native OS methods.
-- **Zero-Byte File Purging:** Safely frees up file system records by removing empty files.
-- **Timestamped Execution Audits:** Writes structured execution statistics into custom log files.
-- **Background Task Scheduling:** Built-in cron-style background runner powered by Python's `schedule` library.
-- **CLI Options:** Features user-friendly flags (`--h` for Help, `--u` for Usage).
-
----
-
-## Directory Structure
-
-```
-DiskSanitizer/
-├── DiskSanitizer.py      # Main automation script
-├── requirements.txt      # Project dependencies
-├── README.md             # Documentation
-├── LICENSE               # Open-source license (MIT)
-└── .gitignore            # Git ignore configuration
-```
-
----
-
-## Installation & Setup
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/<your-username>/DiskSanitizer.git
-   cd DiskSanitizer
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
----
-
-## Usage Examples
-
-### 1. View Help Flags
+Requires **Python 3.8+**. Install the required Python package before running the project:
 
 ```bash
-python DiskSanitizer.py --h
+pip install -r requirements.txt
 ```
 
-**Output:**
-```text
---------------------------------------------------
-      DiskSanitizer - Automated File Cleanup Service
---------------------------------------------------
-Help: This script scans a directory recursively, logs file sizes, and deletes zero-byte empty files.
-Use option '--u' for usage instructions.
---------------------------------------------------
- Thank you for using DiskSanitizer Automation Service 
---------------------------------------------------
-```
-
-### 2. View Usage Guide
+or directly:
 
 ```bash
-python DiskSanitizer.py --u
+pip install schedule
 ```
+
+`os`, `sys`, `stat`, `logging`, `argparse`, `signal`, `threading`, `pathlib`, `datetime` and `dataclasses` are part of the Python standard library and need no installation.
+
+---
+
+## File Information
+
+**Source:** Any local directory given on the command line
+
+**Cleanup Rule:**
+
+- Regular files of **0 bytes** are deleted
+- All other files are only measured and logged
+
+**Never Touched:**
+
+1. Symbolic links (skipped and logged)
+2. Other non-regular files (sockets, devices)
+3. The tool's own log folder and report files
+4. Directories (empty folders are kept)
 
 **Output:**
-```text
---------------------------------------------------
-      DiskSanitizer - Automated File Cleanup Service
---------------------------------------------------
-Usage Guide:
-  python DiskSanitizer.py <Absolute_Directory_Path>
-Example:
-  python DiskSanitizer.py C:\Users\Public\Downloads
---------------------------------------------------
- Thank you for using DiskSanitizer Automation Service 
---------------------------------------------------
+
+- One audit report per run: `DiskSanitizer_Log_YYYY-MM-DD_HH-MM-SS.log`
+
+---
+
+## Workflow
+
+### Argument Parsing
+
+- Parse arguments with `argparse`
+- `directory`: folder to scan and clean
+- Optional: `--interval` (minutes, default 1), `--log-folder` (default `DiskSanitizerLogs`), `--dry-run`, `--once`, `--verbose`, `--version`
+
+### Path Validation
+
+- Exit with an error if the directory does not exist or is not a directory
+- Refuse to run on a filesystem root (for example `/` or `C:\`)
+
+### Recursive Scanning
+
+- Walk the whole tree using `os.walk` (symbolic links are not followed)
+- Read each file's size with `lstat`
+- Skip the log folder and non-regular files
+
+### Cleanup
+
+- **Step 1:** Write the file path and size to the report
+- **Step 2:** If the size is 0 bytes, delete it (or only report it in dry-run mode)
+- **Step 3:** If deletion fails (locked or protected file), record the error and continue
+
+### Report Writing
+
+- Write the header, per-file lines and a summary of counters (scanned, found, deleted, skipped, errors)
+- Save to a temporary file, then rename it to the final name
+- A report is never overwritten (a counter is added if the name already exists)
+
+### Scheduling
+
+- Run **one cleanup immediately**, then repeat using `schedule.every(interval).minutes`
+- A failed run is logged with its traceback and does **not** stop the scheduler
+- Press **Ctrl + C** (or send SIGTERM) to stop cleanly, with no stack trace
+
+---
+
+## Running the Project
+
+### Show Help
+
+```bash
+python DiskSanitizer.py --help
 ```
 
-### 3. Real-World Execution Walkthrough
+### Preview First (Recommended)
 
-#### **Before Execution (Directory Structure):**
+```bash
+python DiskSanitizer.py /home/user/project_builds --dry-run --once
+```
+
+Nothing is deleted. The report lists the files that would be removed.
+
+### Start Cleanup Service
+
+```bash
+python DiskSanitizer.py /home/user/project_builds --interval 5
+```
+
+Expected output:
+
+```text
+2026-10-28 11:20:00 [INFO] Target directory: /home/user/project_builds
+2026-10-28 11:20:00 [INFO] Mode: LIVE (empty files will be deleted)
+2026-10-28 11:20:00 [INFO] Cleanup scheduled every 5 minute(s). Press Ctrl + C to stop.
+2026-10-28 11:20:00 [INFO] Run complete: 5 scanned, 2 empty, 2 deleted, 0 errors. Report: /home/user/DiskSanitizerLogs/DiskSanitizer_Log_2026-10-28_11-20-00.log
+```
+
+### Run Once and Exit
+
+```bash
+python DiskSanitizer.py /home/user/project_builds --once
+```
+
+Useful for cron jobs and Windows Task Scheduler. Exit code is `0` on success and `1` on failure.
+
+### Stop the Service
+
+Press **Ctrl + C**:
+
+```text
+2026-10-28 11:27:41 [INFO] Received SIGINT. Shutting down...
+2026-10-28 11:27:41 [INFO] DiskSanitizer stopped.
+```
+
+### Error Handling Examples
+
+```text
+$ python DiskSanitizer.py /does/not/exist
+2026-10-28 11:20:00 [ERROR] Directory does not exist: /does/not/exist
+
+$ python DiskSanitizer.py /
+2026-10-28 11:20:00 [ERROR] Refusing to clean a filesystem root: /
+
+$ python DiskSanitizer.py /home/user/project_builds --interval 0
+DiskSanitizer.py: error: argument -i/--interval: value must be at least 1
+```
+
+---
+
+## Visualizations
+
+- Not applicable. The output is a structured text report that can be read directly or parsed by other tools.
+
+---
+
+## Log Storage
+
+- Reports are saved in the folder given by `--log-folder` (default `DiskSanitizerLogs/`)
+- Each run creates a new file, so earlier reports are never overwritten
+- File name format: `DiskSanitizer_Log_YYYY-MM-DD_HH-MM-SS.log`
+
+```text
+DiskSanitizerLogs/
+├── DiskSanitizer_Log_2026-10-28_11-20-00.log
+├── DiskSanitizer_Log_2026-10-28_11-25-00.log
+└── DiskSanitizer_Log_2026-10-28_11-30-00.log
+```
+
+---
+
+## Sample Run
+
+Before:
+
 ```text
 /home/user/project_builds/
 ├── main.py (2048 bytes)
@@ -147,26 +193,15 @@ Example:
     └── crash_dump.log (0 bytes)
 ```
 
-#### **Run Command:**
-```bash
-python DiskSanitizer.py /home/user/project_builds
-```
+Audit report:
 
-#### **Terminal Output:**
 ```text
 --------------------------------------------------
-      DiskSanitizer - Automated File Cleanup Service
+         DiskSanitizer Directory & Storage Management
 --------------------------------------------------
-[+] Starting periodic cleanup job for: /home/user/project_builds
-[+] Job scheduled every 1 minute. Press Ctrl+C to stop.
-
-[+] Creating log file: DiskSanitizer_Log_Wed_Sep_30_10_30_00_2026.log
-```
-
-#### **Generated Audit Log Content (`DiskSanitizer_Log_Wed_Sep_30_10_30_00_2026.log`):**
-```text
---------------------------------------------------
-         DiskSanitizer Directory & Storage Management Script
+Target Directory : /home/user/project_builds
+Mode             : LIVE (empty files are deleted)
+Started At       : 2026-10-28 11:20:00
 --------------------------------------------------
 
 Scanned files and sizes:
@@ -180,14 +215,18 @@ Scanned files and sizes:
 /home/user/project_builds/debug_logs/crash_dump.log : 0 bytes
    [DELETED] Empty file removed: /home/user/project_builds/debug_logs/crash_dump.log
 --------------------------------------------------
-Total files scanned: 5
-Total zero-byte files deleted: 2
+Total files scanned          : 5
+Zero-byte files found        : 2
+Zero-byte files deleted      : 2
+Skipped (not regular files)  : 0
+Errors                       : 0
 --------------------------------------------------
-Execution timestamp: Wed Sep 30 10:30:00 2026
+Finished At : 2026-10-28 11:20:00 (0.01s)
 --------------------------------------------------
 ```
 
-#### **After Execution (Directory Structure):**
+After:
+
 ```text
 /home/user/project_builds/
 ├── main.py (2048 bytes)
@@ -197,10 +236,12 @@ Execution timestamp: Wed Sep 30 10:30:00 2026
 └── debug_logs/
 ```
 
+> **Warning:** Deleted files are **not** moved to the recycle bin and cannot be recovered. Always run with `--dry-run` first on a new directory. A file that is empty at scan time may be a placeholder or lock file that another program expects to exist.
+
 ---
 
 ## Author
 
 **Prathmesh Girme**
-* GitHub: [@Prathmesh-Girme](https://github.com/<Prathmesh-Girme>)
-
+GitHub: [@Prathmesh-Girme](https://github.com/Prathmesh-Girme)
+**Date:** 20/10/2026
